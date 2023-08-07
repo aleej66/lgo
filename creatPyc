@@ -1,0 +1,105 @@
+# _*_ coding: utf_8 _*_
+
+# @Author: Forzal
+
+# @Time: 2021/12/14 15:58
+
+# @File: tar.py
+
+# @Emile: zhangkui@solaxpower.com
+import subprocess as sp
+import base64
+import hashlib
+
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import PKCS1_v1_5 as Cipher_PKC
+
+def get_file_md5(path):
+    with open(path, 'rb') as f:
+        file = f.read()
+    md5hash = hashlib.md5(file)
+    md5 = md5hash.hexdigest()
+    print(path, md5)
+    return md5
+
+def get_file_md5_encrypt(file_name):
+    plaintext = get_file_md5('/home/pi/{}'.format(file_name))
+
+    # 加载公钥
+    rsa_key = RSA.import_key(open("/home/pi/encrypt/client-public.pem").read())
+
+    # 加密
+    cipher_rsa = Cipher_PKC.new(rsa_key)
+    en_data = cipher_rsa.encrypt(plaintext.encode("utf-8"))  # 加密
+
+    # base64 进行编码
+    base64_text = base64.b64encode(en_data)
+
+    text = base64_text.decode()  # 返回字符串
+
+    with open('./message.txt', 'w') as f:
+        f.write(text)
+
+def run(version, tar_file_name):
+    # 1. 生成秘钥
+    cmd = "openssl rand -base64 32"
+    res = sp.getstatusoutput(cmd)
+    if res[0] != 0:
+        print('生成密钥失败')
+        return False
+    else:
+        print('生成密钥成功: {}'.format(res[1]))
+        key = res[1]
+    # 2. 压缩打包项目文件 : datalogger.tar.gz
+    cmd = 'tar -czvf datalogger.tar.gz ./datalogger'
+    # cmd = 'tar -czvf - ./datalogger | openssl des3 -salt -k {} -out ./datalogger_{}.tar.gz'.format(key, version)
+    res = sp.getstatusoutput(cmd)
+    if res[0] != 0:
+        print('压缩项目文件失败')
+        return False
+    else:
+        print('压缩项目文件成功')
+    # 3. 获取项目文件的md5值
+    file_name_3 = 'datalogger.tar.gz'
+    get_file_md5_encrypt(file_name_3)
+    print('加密压缩包MD5成功')
+
+    # 4. 加密打包datalogger.tar.gz + message.txt 为 datalogger_v1.02.tar.gz (v1.02为版本)
+    file_name_2 = 'datalogger_{}.tar.gz'.format(version)
+    cmd = 'tar -czvf - {} message.txt | openssl des3 -salt -k {} -out {}'.format(file_name_3, key, file_name_2)
+    res = sp.getstatusoutput(cmd)
+    if res[0] != 0:
+        print('加密压缩项目文件加MD5文件失败')
+        return False
+    else:
+        print('加密压缩项目文件加MD5文件成功')
+
+    # 5. 加密压缩密码
+    # 加载公钥
+    rsa_key = RSA.import_key(open("/home/pi/encrypt/client-public.pem").read())
+
+    # 加密
+    cipher_rsa = Cipher_PKC.new(rsa_key)
+    en_data = cipher_rsa.encrypt(key.encode("utf-8"))  # 加密
+
+    # base64 进行编码
+    base64_text = base64.b64encode(en_data)
+
+    text = base64_text.decode()  # 返回字符串
+
+    with open('./key.txt', 'w') as f:
+        f.write(text)
+    print('加密压缩密钥成功')
+
+    # 6. 打包加密压缩包 datalogger_v1.02.tar.gz  + key.txt 为压缩包 datahub_v1.02.tar
+    # 修改输出目录
+    cmd = 'sudo tar -cvf /home/pi/share/{} ./{} key.txt'.format(tar_file_name, file_name_2)
+    res = sp.getstatusoutput(cmd)
+    if res[0] != 0:
+        print('打包升级文件包失败')
+        return False
+    else:
+        print('打包升级文件包成功')
+
+if __name__ == '__main__':
+    run('v1.02','datahub_v1.02.tar')
